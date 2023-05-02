@@ -45,55 +45,6 @@ az network vnet create \
   --address-prefix 172.16.0.0/16
 ```
 
-#Peerings
-```
-# Get the id for Hub
-HubId=$(az network vnet show --resource-group $RG --name Hub --query id --out tsv)
-
-# Get the id for Spoke1.
-Spoke1=$(az network vnet show --resource-group $RG --name Spoke1 --query id --out tsv)
-
-# Peer Hub to Spoke1.
-az network vnet peering create \
-  --name LinkHubToSpoke1 \
-  --resource-group $RG \
-  --vnet-name Hub \
-  --remote-vnet Spoke1 \
-  --allow-vnet-access \
-  --allow-gateway-transit \
-  --allow-forwarded-traffic
-
-# Peer Spoke1 to Hub.
-az network vnet peering create \
---name LinkSpoke1ToHub \
---resource-group $RG \
---vnet-name Spoke1 \
---remote-vnet Hub \
---allow-vnet-access \
---use-remote-gateways \
---allow-forwarded-traffic
-
-# Peer Hub to Spoke2.
-az network vnet peering create \
---name LinkHubToSpoke2 \
---resource-group $RG \
---vnet-name Hub \
---remote-vnet Spoke2 \
-  --allow-vnet-access \
-  --allow-gateway-transit \
-  --allow-forwarded-traffic
-
-# Peer Spoke2 to Hub.
-az network vnet peering create \
---name LinkSpoke2ToHub \
---resource-group $RG \
---vnet-name Spoke2 \
---remote-vnet Hub \
---allow-vnet-access \
---use-remote-gateways \
---allow-forwarded-traffic
-```
-
 #Subnets
 #Hub
 
@@ -183,12 +134,15 @@ az vm boot-diagnostics enable -g $RG -n onprem
 az network public-ip create \
   -n pip-hub \
   -g $RG \
-  --allocation-method Dynamic
+  --allocation-method static
 
 az network public-ip create \
   -n pip-onprem \
   -g $RG \
-  --allocation-method Dynamic
+  --allocation-method static
+
+# Experienced a delay after creation where the PIP isn't available
+sleep 30s
 
 PIPofVPNGWHub=$(az network public-ip show -n pip-hub -g $RG --query "ipAddress" -o tsv | tr -d '[:space:]')
 PIPofVPNGWOnPrem=$(az network public-ip show -n pip-onprem -g $RG --query "ipAddress" -o tsv | tr -d '[:space:]')
@@ -197,7 +151,7 @@ echo "PIPofVPNGWHub: $PIPofVPNGWHub"
 echo "PIPofVPNGWOnPrem: $PIPofVPNGWOnPrem"
 ```
 
-### VPN Gateways
+###VPN Gateways
 ```
 az network vnet-gateway create \
   -g $RG \
@@ -262,7 +216,7 @@ echo "IDofLNGtoHub: $IDofLNGtoHub"
 echo "IDofLNGtoOnPrem: $IDofLNGtoOnPrem"
 ```
 
-# Create the VPN Connections
+#Create the VPN Connections
 ```
 az network vpn-connection create \
   -n conn-to-onprem \
@@ -279,4 +233,53 @@ az network vpn-connection create \
   --enable-bgp \
   --shared-key "abc123" \
   --local-gateway2 lng-hub
+```
+
+#Peerings
+```
+# Get the id for Hub
+HubId=$(az network vnet show --resource-group $RG --name Hub --query id --out tsv)
+
+# Get the id for Spoke1.
+Spoke1=$(az network vnet show --resource-group $RG --name Spoke1 --query id --out tsv)
+
+# Peer Hub to Spoke1.
+az network vnet peering create \
+  --name LinkHubToSpoke1 \
+  --resource-group $RG \
+  --vnet-name Hub \
+  --remote-vnet Spoke1 \
+  --allow-vnet-access \
+  --allow-gateway-transit \
+  --allow-forwarded-traffic
+
+# Peer Spoke1 to Hub.
+az network vnet peering create \
+--name LinkSpoke1ToHub \
+--resource-group $RG \
+--vnet-name Spoke1 \
+--remote-vnet Hub \
+--allow-vnet-access \
+--use-remote-gateways \
+--allow-forwarded-traffic
+
+# Peer Hub to Spoke2.
+az network vnet peering create \
+--name LinkHubToSpoke2 \
+--resource-group $RG \
+--vnet-name Hub \
+--remote-vnet Spoke2 \
+  --allow-vnet-access \
+  --allow-gateway-transit \
+  --allow-forwarded-traffic
+
+# Peer Spoke2 to Hub.
+az network vnet peering create \
+--name LinkSpoke2ToHub \
+--resource-group $RG \
+--vnet-name Spoke2 \
+--remote-vnet Hub \
+--allow-vnet-access \
+--use-remote-gateways \
+--allow-forwarded-traffic
 ```
