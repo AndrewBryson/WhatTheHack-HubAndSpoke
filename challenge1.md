@@ -141,9 +141,6 @@ az network public-ip create \
   -g $RG \
   --allocation-method static
 
-# Experienced a delay after creation where the PIP isn't available
-sleep 30s
-
 PIPofVPNGWHub=$(az network public-ip show -n pip-hub -g $RG --query "ipAddress" -o tsv | tr -d '[:space:]')
 PIPofVPNGWOnPrem=$(az network public-ip show -n pip-onprem -g $RG --query "ipAddress" -o tsv | tr -d '[:space:]')
 
@@ -159,9 +156,8 @@ az network vnet-gateway create \
   --public-ip-address pip-hub \
   --vnet Hub \
   --gateway-type Vpn \
-  --sku VpnGw1 \
+  --sku Basic \
   --vpn-type RouteBased \
-  --asn 65010 \
   --no-wait
 
 az network vnet-gateway create \
@@ -170,9 +166,8 @@ az network vnet-gateway create \
   --public-ip-address pip-onprem \
   --vnet onprem \
   --gateway-type Vpn \
-  --sku VpnGw1 \
+  --sku Basic \
   --vpn-type RouteBased \
-  --asn 65011 \
   --no-wait
 
 IDofVPNGWHub=$(az network vnet-gateway show -n vpngw-hub -g $RG --query "id" -o tsv)
@@ -187,33 +182,23 @@ az network vnet-gateway wait --updated --ids $IDofVPNGWHub $IDofVPNGWOnPrem
 #Create the Local Network Gateways
 
 ```
-PeerAddressOfHub=$(az network vnet-gateway show -n vpngw-hub -g $RG --query "bgpSettings.bgpPeeringAddress" -o tsv | tr -d '[:space:]')
-PeerAddressOfOnPrem=$(az network vnet-gateway show -n vpngw-onprem -g $RG --query "bgpSettings.bgpPeeringAddress" -o tsv | tr -d '[:space:]')
+#PeerAddressOfHub=$(az network vnet-gateway show -n vpngw-hub -g $RG --query "bgpSettings.bgpPeeringAddress" -o tsv | tr -d '[:space:]')
+#PeerAddressOfOnPrem=$(az network vnet-gateway show -n vpngw-onprem -g $RG --query "bgpSettings.bgpPeeringAddress" -o tsv | tr -d '[:space:]')
 
-echo "PeerAddressOfHub: $PeerAddressOfHub"
-echo "PeerAddressOfOnPrem: $PeerAddressOfOnPrem"
+#echo "PeerAddressOfHub: $PeerAddressOfHub"
+#echo "PeerAddressOfOnPrem: $PeerAddressOfOnPrem"
 
 az network local-gateway create \
   --gateway-ip-address $PIPofVPNGWOnPrem \
   -n lng-onprem \
   -g $RG \
-  --local-address-prefixes $PeerAddressOfOnPrem/32 \
-  --asn 65011 \
-  --bgp-peering-address $PeerAddressOfOnPrem
+  --local-address-prefixes 172.16.0.0/16
 
 az network local-gateway create \
   --gateway-ip-address $PIPofVPNGWHub \
   -n lng-hub \
   -g $RG \
-  --local-address-prefixes $PeerAddressOfHub/32 \
-  --asn 65010 \
-  --bgp-peering-address $PeerAddressOfHub  
-
-IDofLNGtoHub=$(az network local-gateway show -n lng-hub -g $RG --query "id" -o tsv)
-IDofLNGtoOnPrem=$(az network local-gateway show -n lng-onprem -g $RG --query "id" -o tsv)
-
-echo "IDofLNGtoHub: $IDofLNGtoHub"
-echo "IDofLNGtoOnPrem: $IDofLNGtoOnPrem"
+  --local-address-prefixes 10.0.0.0/16 10.1.0.0/16 10.2.0.0/16
 ```
 
 #Create the VPN Connections
@@ -222,7 +207,6 @@ az network vpn-connection create \
   -n conn-to-onprem \
   -g $RG \
   --vnet-gateway1 vpngw-hub \
-  --enable-bgp \
   --shared-key "abc123" \
   --local-gateway2 lng-onprem
 
@@ -230,7 +214,6 @@ az network vpn-connection create \
   -n conn-to-hub \
   -g $RG \
   --vnet-gateway1 vpngw-onprem \
-  --enable-bgp \
   --shared-key "abc123" \
   --local-gateway2 lng-hub
 ```
@@ -269,9 +252,9 @@ az network vnet peering create \
 --resource-group $RG \
 --vnet-name Hub \
 --remote-vnet Spoke2 \
-  --allow-vnet-access \
-  --allow-gateway-transit \
-  --allow-forwarded-traffic
+--allow-vnet-access \
+--allow-gateway-transit \
+--allow-forwarded-traffic
 
 # Peer Spoke2 to Hub.
 az network vnet peering create \

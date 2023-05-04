@@ -35,6 +35,8 @@ az network public-ip show \
 
 fwprivaddr="$(az network firewall ip-config list -g $RG -f fw --query "[?name=='FW-config'].privateIpAddress" --output tsv | tr -d '[:space:]')"
 
+fwpublicaddr="$(az network public-ip show -g $RG -n fw-pip --query "ipAddress" -o tsv | tr -d '[:space:]')"
+
 ```
 
 ##Firewall Policy and Rule Collection Group
@@ -43,12 +45,12 @@ az network firewall policy create \
     -g $RG \
     -n fw-policy 
 
+# Rule Collection Group create
 az network firewall policy rule-collection-group create \
     -g $RG \
     --name collection-1 \
     --policy-name fw-policy \
     --priority 1000
-
 ```
 
 ##Network rules
@@ -61,12 +63,118 @@ az network firewall policy rule-collection-group collection add-filter-collectio
     --action Allow \
     --rule-name network_rule \
     --rule-type NetworkRule \
-    --description "Allow VM network traffic" \
+    --description "Azure to onprem" \
     --destination-addresses "172.16.0.0/16" \
     --source-addresses "10.0.0.0/8" \
     --destination-ports "*" \
-    --ip-protocols TCP UDP ICMP \
+    --ip-protocols Any \
     --collection-priority 10000
+
+az network firewall policy rule-collection-group collection rule add \
+    -g $RG \
+    --policy-name fw-policy \
+    --collection-name filter_collection \
+    --rcg-name collection-1 \
+    --name onprem-to-azure \
+    --rule-type NetworkRule \
+    --description "Onprem to Azure" \
+    --destination-addresses "10.0.0.0/8" \
+    --source-addresses "172.16.0.0/16" \
+    --destination-ports "*" \
+    --ip-protocols Any
+
+az network firewall policy rule-collection-group collection rule add \
+    -g $RG \
+    --policy-name fw-policy \
+    --collection-name filter_collection \
+    --rcg-name collection-1 \
+    --name azure-to-azure \
+    --rule-type NetworkRule \
+    --description "Intra Azure" \
+    --destination-addresses "10.0.0.0/8" \
+    --source-addresses "10.0.0.0/8" \
+    --destination-ports "*" \
+    --ip-protocols Any
+
+az network firewall policy rule-collection-group collection rule add \
+    -g $RG \
+    --policy-name fw-policy \
+    --collection-name filter_collection \
+    --rcg-name collection-1 \
+    --name all-networks-to-internet \
+    --rule-type NetworkRule \
+    --description "All networks to internet" \
+    --destination-addresses "0.0.0.0/0" \
+    --source-addresses "10.0.0.0/8" "172.16.0.0/16" \
+    --destination-ports "*" \
+    --ip-protocols Any
+
+```
+
+## NAT rules for incoming web traffic
+```
+
+# NAT rule collection
+az network firewall policy rule-collection-group collection add-nat-collection \
+    -n nat_collection \
+    --collection-priority 500 \
+    --policy-name fw-policy \
+    -g $RG \
+    --rule-collection-group-name collection-1 \
+    --action DNAT \
+    --ip-protocols TCP \
+    --rule-name port-8080-to-onprem-web-server \
+    --source-addresses "*" \
+    --description "port-8080-to-onprem-web-server" \
+    --destination-addresses "$fwpublicaddr" \
+    --destination-ports 8080 \
+    --translated-address "172.16.10.4" \
+    --translated-port 80
+
+az network firewall policy rule-collection-group collection rule add \
+    -g $RG \
+    --policy-name fw-policy \
+    --collection-name nat_collection \
+    --rcg-name collection-1 \
+    --name port-8081-to-hub-web-server \
+    --rule-type NatRule \
+    --source-addresses "*" \
+    --description "port-8081-to-hub-web-server" \
+    --destination-addresses "$fwpublicaddr" \
+    --destination-ports 8081 \
+    --translated-address "10.0.10.4" \
+    --translated-port 80 \
+    --ip-protocols TCP
+
+az network firewall policy rule-collection-group collection rule add \
+    -g $RG \
+    --policy-name fw-policy \
+    --collection-name nat_collection \
+    --rcg-name collection-1 \
+    --name port-8082-to-spoke1-web-server \
+    --rule-type NatRule \
+    --source-addresses "*" \
+    --description "port-8082-to-spoke1-web-server" \
+    --destination-addresses "$fwpublicaddr" \
+    --destination-ports 8082 \
+    --translated-address "10.1.10.4" \
+    --translated-port 80 \
+    --ip-protocols TCP
+
+az network firewall policy rule-collection-group collection rule add \
+    -g $RG \
+    --policy-name fw-policy \
+    --collection-name nat_collection \
+    --rcg-name collection-1 \
+    --name port-8083-to-spoke2-web-server \
+    --rule-type NatRule \
+    --source-addresses "*" \
+    --description "port-8083-to-spoke2-web-server" \
+    --destination-addresses "$fwpublicaddr" \
+    --destination-ports 8083 \
+    --translated-address "10.1.10.4" \
+    --translated-port 80 \
+    --ip-protocols TCP
 
 ```
 
@@ -90,6 +198,7 @@ az network firewall ip-config create \
 
 ##Routes
 ```
+# For the spokes
 az network route-table create \
     -g $RG \
     -n rt \
@@ -103,17 +212,54 @@ az network route-table route create \
     --address-prefix 0.0.0.0/0 \
     --next-hop-ip-address $fwprivaddr
 
+az network route-table route create \
+    -g $RG \
+    --route-table-name rt \
+    -n to-hub \
+    --next-hop-type VirtualAppliance \
+    --address-prefix 10.0.0.0/16 \
+    --next-hop-ip-address $fwprivaddr
+
+# For the GatewaySubnet
 az network route-table create \
     -g $RG \
-    -n rt-gateway \
-    --disable-bgp-route-propagation true
+    -n rt-gateway
 
 az network route-table route create \
     -g $RG \
     --route-table-name rt-gateway \
     -n to-firewall \
     --next-hop-type VirtualAppliance \
-    --address-prefix 10.0.0.0/8 \
+    --address-prefix 10.1.0.0/16 \
+    --next-hop-ip-address $fwprivaddr
+
+# For the Hub subnets
+az network route-table create \
+    -g $RG \
+    -n rt-hub
+
+az network route-table route create \
+    -g $RG \
+    --route-table-name rt-hub \
+    -n spoke1-to-firewall \
+    --next-hop-type VirtualAppliance \
+    --address-prefix 10.1.0.0/16 \
+    --next-hop-ip-address $fwprivaddr
+
+az network route-table route create \
+    -g $RG \
+    --route-table-name rt-hub \
+    -n spoke2-to-firewall \
+    --next-hop-type VirtualAppliance \
+    --address-prefix 10.2.0.0/16 \
+    --next-hop-ip-address $fwprivaddr
+
+az network route-table route create \
+    -g $RG \
+    --route-table-name rt-hub \
+    -n onprem-to-firewall \
+    --next-hop-type VirtualAppliance \
+    --address-prefix 172.16.0.0/16 \
     --next-hop-ip-address $fwprivaddr
 
 ```
@@ -136,7 +282,7 @@ az network vnet subnet update \
     -g $RG \
     -n default \
     --vnet-name hub \
-    --route-table rt
+    --route-table rt-hub
 
 az network vnet subnet update \
     -g $RG \
@@ -144,4 +290,10 @@ az network vnet subnet update \
     --vnet-name hub \
     --route-table rt-gateway
 
+```
+
+# apache2 install
+# Run on each machine...
+```
+sudo apt update && sudo apt install -y apache2
 ```
