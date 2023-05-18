@@ -178,7 +178,7 @@ az network firewall policy rule-collection-group collection rule add \
 
 ```
 
-##Associate the Policy to the Firewall
+##Create the Firewall and associate the Policy
 ```
 az network firewall create \
     --name fw \
@@ -194,6 +194,22 @@ az network firewall ip-config create \
     -g $RG \
     --vnet-name Hub
     
+```
+
+## Firewall diagnostic settings
+```
+fwid=$(az network firewall show -g $RG -n fw --query "id" -o tsv | tr -d '[:space:]')
+### Create a Log Analytics Workspace for FW logs
+az monitor log-analytics workspace create \
+    -g $RG \
+    -n law-fw
+
+az monitor diagnostic-settings create \
+    -n DiagLogAnalytics \
+    --resource $fwid \
+    --logs '[{"category":"AZFWNetworkRule", "Enabled":true},{"category":"AZFWApplicationRule", "Enabled":true},{"category":"AZFWNatRule", "Enabled":true}]' \
+    --workspace law-fw
+
 ```
 
 ##Routes
@@ -293,7 +309,16 @@ az network vnet subnet update \
 ```
 
 # apache2 install
-# Run on each machine...
 ```
-sudo apt update && sudo apt install -y apache2
+s=("onprem" "hub" "spoke1" "spoke2") 
+for vm in ${s[@]}; 
+do
+    az vm run-command create \
+        -g $RG \
+        --async-execution true \
+        --name "install-apache2" \
+        --script 'apt update && apt install -y apache2' \
+        --vm-name $vm
+done
+
 ```
